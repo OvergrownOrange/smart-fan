@@ -20,7 +20,7 @@ pwm.start(0)
 
 #Define the upper and lower bounds of the temperature guage
 tempMin = 25
-tempMax = 30
+tempMax = 45
 
 
 def getTemperature():
