@@ -5,6 +5,7 @@ import time
 import requests
 from multiprocessing import Process, Value
 import json
+import os, sys
 
 fan = 13       # PWM pin
 sensor = 4     # Temperature sensorSensor Pin
@@ -15,13 +16,16 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(fan,GPIO.OUT)
 GPIO.setup(sensor,GPIO.IN)
 
-pwm = GPIO.PWM(fan, 100)
-pwm.start(0)
-
-#Define the upper and lower bounds of the temperature guage
+#Define the upper and lower bounds of the temperature gauge
 tempMin = 25
 tempMax = 45
 
+# Get the Webhook API key
+with open(os.path.join(sys.path[0], 'key.json'), 'r') as json_file:
+    data = json.load(json_file)
+    key = data['key']
+
+url = 'https://maker.ifttt.com/trigger/smart_fan/with/key/' + key
 
 def getTemperature():
     tempStore = open("/sys/bus/w1/devices/28-0060a70000af/w1_slave")
@@ -32,10 +36,6 @@ def getTemperature():
     temperature = float(tempData[2:])
     temperature = temperature/1000
     return int(temperature)
-
-
-def setPWM(duty):
-    pwm.ChangeDutyCycle(duty)
 
 
 #Map the temperature range to the PWM range
@@ -63,38 +63,39 @@ def alert(temp):
     global alerted
     alerted.value = 1
 
-    # Get the Webhook API key
-    with open('key.json') as json_file:
-        data = json.load(json_file)
-        key = data['key']
-
-    url = 'https://maker.ifttt.com/trigger/rack_temperature/with/key/' + key
-    payload = {'value1' : "temp"}
+    #Send the high temperature notification
+    message = 'High temperature detected in Rack! ' + str(temp) + '°C'
+    payload = {'value1' : message}
     requests.post(url, data=payload)
     
-    # Delay running this alert over and over
-    time.sleep(1800)  
+    time.sleep(1800)        # Sleep this process to stop several notifications
     temp = getTemperature()
     if temp <= tempMax: 
         alerted.value = 0
     else:
-        alert(temp)       # Still hot, send another alert!
+        alert(temp)         # Still hot, send another alert!
 
 
 def main():
     global alerted
+    pwm = GPIO.PWM(fan, 100)
+    pwm.start(0)
     try:
         while True:
             temperature = getTemperature()
             dutyCycle = calcDuty(temperature)
-            setPWM(dutyCycle)
+            pwm.ChangeDutyCycle(dutyCycle)
             
-            if temperature > tempMax and alerted.value == 0:        # Start a seperate thread for alert
-                p2 = Process(target=alert, args=[temperature])
+            if temperature > tempMax and alerted.value == 0:        # Start a seperate process for alerts
+                p2 = Process(target=alert, args=[temperature])      # to avoid the main loop sleep
                 p2.start()
 
-            time.sleep(5)
+            time.sleep(60)                                          # Run every minute
     except:
+        #Notify that the application has failed
+        payload = {'value1' : "Smartfan application has failed!"}
+        requests.post(url, data=payload)
+        
         pwm.stop()
         GPIO.cleanup()
 
